@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>我的3D模型展示</title>
+    <title>我的3D模型展示 - 多模型切换</title>
     <style>
         body { margin: 0; overflow: hidden; font-family: 'Microsoft YaHei', sans-serif; }
         #info {
@@ -21,13 +21,57 @@
         @media (max-width: 600px) {
             #info { font-size: 10px; top: 10px; left: 10px; }
         }
+        #model-selector {
+            position: absolute;
+            bottom: 20px;
+            left: 20px;
+            background: rgba(0,0,0,0.7);
+            padding: 10px 15px;
+            border-radius: 8px;
+            color: white;
+            z-index: 20;
+            font-family: sans-serif;
+            backdrop-filter: blur(5px);
+            pointer-events: auto;
+        }
+        select {
+            margin-left: 10px;
+            padding: 5px;
+            border-radius: 4px;
+            background: #333;
+            color: white;
+            border: 1px solid #88aaff;
+        }
+        #loading-hint {
+            position: absolute;
+            bottom: 80px;
+            left: 20px;
+            background: rgba(0,0,0,0.6);
+            color: #88aaff;
+            padding: 5px 12px;
+            border-radius: 20px;
+            font-size: 14px;
+            z-index: 20;
+            font-family: monospace;
+            pointer-events: none;
+            display: none;
+        }
     </style>
 </head>
 <body>
     <div id="info">
         <h2>✨ 3D 模型展示</h2>
-        <p>鼠标拖拽旋转 | 右键拖拽平移 | 滚动缩放</p>
+        <p>鼠标拖拽旋转 | 右键拖拽平移 | 滚动缩放 | 下拉切换模型</p>
     </div>
+
+    <div id="model-selector">
+        <label for="model-choice">选择模型：</label>
+        <select id="model-choice">
+            <option value="scene_optimized.glb">场景模型 1 (optimized)</option>
+            <option value="scene_optimized2.glb">场景模型 2 (optimized2)</option>
+        </select>
+    </div>
+    <div id="loading-hint">加载中...</div>
 
     <!-- 引入 Three.js 核心库以及扩展组件 -->
     <script type="importmap">
@@ -43,7 +87,7 @@
         import * as THREE from 'three';
         import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
         import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
-        import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';  // 新增：导入解码器
+        import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
 
         // --- 1. 初始化场景、相机、渲染器 ---
         const scene = new THREE.Scene();
@@ -71,8 +115,8 @@
         controls.enablePan = true;
         controls.target.set(0, 0.5, 0);
 
-        // --- 3. 灯光系统 ---
-        const ambientLight = new THREE.AmbientLight(0xccddff,1.5);
+        // --- 3. 灯光系统 (冷白高亮) ---
+        const ambientLight = new THREE.AmbientLight(0xccddff, 1.5);
         scene.add(ambientLight);
         
         const directionalLight = new THREE.DirectionalLight(0xffffff, 2.5);
@@ -93,7 +137,7 @@
         
         const bottomLight = new THREE.PointLight(0x88aaff, 0.6);
         bottomLight.position.set(0, -1, 0);
-        scene.add(bottomLight)
+        scene.add(bottomLight);
 
         const gridHelper = new THREE.GridHelper(5, 20, 0x88aaff, 0x335588);
         gridHelper.position.y = -0.8;
@@ -112,38 +156,79 @@
         const stars = new THREE.Points(starGeometry, starMaterial);
         scene.add(stars);
         
-        // --- 4. 加载 GLB 模型 (支持 meshopt 压缩) ---
+        // --- 4. 模型加载与切换逻辑 ---
         const loader = new GLTFLoader();
-        loader.setMeshoptDecoder(MeshoptDecoder);  // 新增：设置解码器
-        const modelPath = 'scene_optimized.glb';
-        let model = null;
-
-        loader.load(modelPath, 
-            (gltf) => {
-                model = gltf.scene;
-                model.traverse((node) => {
-                    if (node.isMesh) {
-                        node.castShadow = true;
-                        node.receiveShadow = false;
+        loader.setMeshoptDecoder(MeshoptDecoder);
+        
+        let currentModel = null;           // 当前模型对象
+        const loadingHint = document.getElementById('loading-hint');
+        
+        // 统一的模型加载函数
+        function loadModel(modelPath) {
+            // 移除旧模型并释放资源
+            if (currentModel) {
+                scene.remove(currentModel);
+                currentModel.traverse((child) => {
+                    if (child.isMesh) {
+                        child.geometry.dispose();
+                        if (child.material) {
+                            if (Array.isArray(child.material))
+                                child.material.forEach(m => m.dispose());
+                            else
+                                child.material.dispose();
+                        }
                     }
                 });
-                model.position.set(0, -0.5, 0);
-                model.scale.set(5, 5, 5);
-                scene.add(model);
-                console.log('✅ 模型加载成功');
-            },
-            (xhr) => {
-                console.log(`📦 模型加载进度: ${(xhr.loaded / xhr.total * 100)}%`);
-            },
-            (error) => {
-                console.error('❌ 模型加载失败:', error);
-                const geometry = new THREE.BoxGeometry(1, 1, 1);
-                const material = new THREE.MeshStandardMaterial({ color: 0xff6699 });
-                const placeholder = new THREE.Mesh(geometry, material);
-                placeholder.position.set(0, 0, 0);
-                scene.add(placeholder);
+                currentModel = null;
             }
-        );
+            
+            // 显示加载提示
+            loadingHint.style.display = 'block';
+            
+            loader.load(modelPath,
+                (gltf) => {
+                    const newModel = gltf.scene;
+                    newModel.traverse((node) => {
+                        if (node.isMesh) {
+                            node.castShadow = true;
+                            node.receiveShadow = false;
+                        }
+                    });
+                    // 调整位置和缩放（可根据不同模型微调，这里统一使用相同参数）
+                    newModel.position.set(0, -0.5, 0);
+                    newModel.scale.set(5, 5, 5);
+                    scene.add(newModel);
+                    currentModel = newModel;
+                    loadingHint.style.display = 'none';
+                    console.log(`✅ 模型加载成功: ${modelPath}`);
+                },
+                (xhr) => {
+                    // 可选：显示进度百分比
+                    // const percent = (xhr.loaded / xhr.total * 100).toFixed(0);
+                    // loadingHint.innerText = `加载中 ${percent}%`;
+                },
+                (error) => {
+                    console.error(`❌ 模型加载失败 (${modelPath}):`, error);
+                    loadingHint.style.display = 'none';
+                    // 加载失败时显示一个简单的立方体占位
+                    const geometry = new THREE.BoxGeometry(1, 1, 1);
+                    const material = new THREE.MeshStandardMaterial({ color: 0xff6699 });
+                    const placeholder = new THREE.Mesh(geometry, material);
+                    placeholder.position.set(0, -0.5, 0);
+                    scene.add(placeholder);
+                    currentModel = placeholder;
+                }
+            );
+        }
+        
+        // 监听下拉菜单切换事件
+        const selector = document.getElementById('model-choice');
+        selector.addEventListener('change', (event) => {
+            loadModel(event.target.value);
+        });
+        
+        // 页面初始化：加载默认选中的模型（第一个）
+        loadModel(selector.value);
         
         // --- 5. 简单动画: 让星星粒子缓慢旋转 ---
         function animateStars() {
